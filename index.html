@@ -34,6 +34,14 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--ac);outline-off
 .pl.me{background:#1a4a77;margin:0 -.5rem;padding:.6rem .5rem;border-radius:6px}
 .chip{display:inline-block;background:#0b2036;border-radius:4px;padding:0 .4rem;margin:.15rem .2rem 0 0;font-size:.85rem}
 .log{margin-top:1rem;font-size:.9rem;color:var(--mu)}.log div:last-child{color:var(--tx)}
+.tabs{display:flex;flex-wrap:wrap;gap:.4rem;margin-bottom:.7rem}.tabs button{padding:.3rem .7rem}
+.field{position:relative;display:flex;flex-direction:column;justify-content:space-around;height:340px;padding:.6rem;background:#1f7a4a linear-gradient(#e8f5ec,#e8f5ec) center/100% 2px no-repeat;border:2px solid #e8f5ec;border-radius:8px}
+.field::after{content:'';position:absolute;left:50%;top:50%;width:72px;height:72px;border:2px solid #e8f5ec;border-radius:50%;transform:translate(-50%,-50%)}
+.row{display:flex;justify-content:space-around;position:relative;z-index:1}
+.sl{width:78px;text-align:center}
+.dot{width:42px;height:42px;border-radius:50%;margin:0 auto;border:2px dashed #e8f5eccc;display:grid;place-items:center;font-weight:700}
+.dot.f{background:var(--ac);color:#241a00;border:2px solid #fff}
+.sl small{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:.75rem;text-shadow:0 1px 2px #000}
 table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:.5rem;border-top:1px solid var(--line);vertical-align:top}
 </style>
 </head>
@@ -53,7 +61,7 @@ table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:.5rem;bo
     <button id="vz" onclick="voice=!voice;if(!voice)speechSynthesis.cancel();this.textContent=voice?'Narrador: ligado':'Narrador: desligado'">Narrador: ligado</button>
   </div>
   <div class="grid">
-    <div><div class="panel" id="main"></div><div class="log" id="log"></div></div>
+    <div><div class="panel" id="main"></div><div class="panel" id="pitch" style="margin-top:1rem"></div><div class="log" id="log"></div></div>
     <div class="panel" id="players"></div>
   </div>
 </div>
@@ -61,7 +69,7 @@ table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:.5rem;bo
 <script>
 const $ = id => document.getElementById(id);
 const PN = { GK: 'Goleiro', DEF: 'Defensor', MID: 'Meia', ATT: 'Atacante' };
-let ws, S = null, name = '', room = '', voice = true;
+let ws, S = null, name = '', room = '', voice = true, viewId = null;
 
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const send = m => ws && ws.readyState === 1 && ws.send(JSON.stringify(m));
@@ -120,7 +128,8 @@ function render() {
       <div>${l.bidder ? `Maior lance: <b>${esc(nm(l.bidder))}</b>` : 'Ninguém deu lance ainda'}</div>
       <div class="track"><div id="bar"></div></div><div id="tm" class="mu"></div>
       <div class="btns">${[0, 1, 4, 9].map(d => min + d).map(a =>
-        `<button class="pri" ${can && a <= me.max ? '' : 'disabled'} onclick="bid(${a})">€ ${a}M</button>`).join('')}</div>
+        `<button class="pri" ${can && a <= me.max ? '' : 'disabled'} onclick="bid(${a})">€ ${a}M</button>`).join('')}
+        ${!l.bidder && me.need[l.pos] > 0 ? `<button ${l.skips.includes(me.id) ? 'disabled' : ''} onclick="send({t:'skip'})">⏭ ${l.skips.includes(me.id) ? 'Aguardando' : 'Pular'} (${l.skips.length}/${l.skipNeed})</button>` : ''}</div>
       ${me.need[l.pos] < 1 ? '<p class="bad">Você já completou essa posição.</p>' : l.bidder === me.id ? '<p class="ok">Seu lance está na frente.</p>' : ''}</div>`;
   }
   $('main').innerHTML = h;
@@ -128,7 +137,24 @@ function render() {
     <b>${esc(p.name)}</b>${p.id === S.host ? ' 👑' : ''}${p.on ? '' : ' <span class="bad">(offline)</span>'}
     <span class="mu" style="float:right">€ ${p.budget}M · ${p.squad.length}/${S.total}</span><br>
     ${p.squad.map(x => `<span class="chip">${esc(x.n)} · ${x.price}M</span>`).join('') || '<span class="mu">Sem jogadores</span>'}</div>`).join('');
+  pitch();
   $('log').innerHTML = S.log.map(t => `<div>${esc(t)}</div>`).join('');
+}
+
+function pitch() {
+  const id = S.players.some(p => p.id === viewId) ? viewId : S.you, p = S.players.find(x => x.id === id);
+  const rows = ['ATT', 'MID', 'DEF', 'GK'].map(pos => {
+    const got = p.squad.filter(x => x.pos === pos); let r = '';
+    for (let i = 0; i < S.slots[pos]; i++) {
+      const x = got[i];
+      r += x ? `<div class="sl" title="${esc(x.n)} · € ${x.price}M"><div class="dot f">${x.r}</div><small>${esc(x.n)}</small></div>`
+             : `<div class="sl"><div class="dot"></div><small>&nbsp;</small></div>`;
+    }
+    return `<div class="row">${r}</div>`;
+  }).join('');
+  $('pitch').innerHTML = `<div class="tabs">${S.players.map(q => `<button class="${q.id === id ? 'pri' : ''}" onclick="viewId='${q.id}';render()">${esc(q.name)}</button>`).join('')}</div>
+    <div class="field">${rows}</div>
+    <div class="mu" style="margin-top:.5rem">Nota do time: <b>${score(p)}</b> · Gasto: € ${p.squad.reduce((s, x) => s + x.price, 0)}M</div>`;
 }
 
 setInterval(() => {

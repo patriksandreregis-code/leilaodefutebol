@@ -31,7 +31,8 @@ function view(r) {
       id: p.id, name: p.name, budget: p.budget, squad: p.squad, on: !!p.ws, max: maxBid(p),
       need: Object.fromEntries(Object.keys(SLOTS).map(k => [k, need(p, k)])),
     })),
-    lot: r.lot && { n: r.lot.n, pos: r.lot.pos, r: r.lot.r, base: r.lot.base, bid: r.lot.bid, bidder: r.lot.bidder, left: r.lot.end - Date.now() },
+    lot: r.lot && { n: r.lot.n, pos: r.lot.pos, r: r.lot.r, base: r.lot.base, bid: r.lot.bid, bidder: r.lot.bidder, left: r.lot.end - Date.now(),
+      skips: [...r.lot.skips], skipNeed: r.players.filter(x => x.ws && need(x, r.lot.pos) > 0).length },
   };
 }
 const bc = r => r.players.forEach(p => send(p.ws, { t: 'state', you: p.id, ...view(r) }));
@@ -48,12 +49,13 @@ function nextLot(r) {
     return say(r, `Fim do leilão! O campeão é ${w.name}!`);
   }
   const base = Math.max(1, x[2] - 80);
-  r.lot = { n: x[0], pos: x[1], r: x[2], base, bid: 0, bidder: null, end: Date.now() + BID_MS };
+  r.lot = { n: x[0], pos: x[1], r: x[2], base, bid: 0, bidder: null, skips: new Set(), end: Date.now() + BID_MS };
   say(r, `Próximo jogador: ${x[0]}, ${NAME[x[1]]}, nota ${x[2]}. Lance inicial: ${base} milhões!`);
   arm(r);
 }
 
 function close(r) {
+  clearTimeout(r.timer);
   const l = r.lot; r.lot = null;
   if (l.bidder) {
     const p = r.players.find(p => p.id === l.bidder);
@@ -84,11 +86,18 @@ wss.on('connection', ws => {
     } else if (!r || !p) return;
     else if (m.t === 'start' && p.id === r.host && r.phase === 'lobby') {
       r.phase = 'auction'; r.log = [];
-      r.queue = ['GK', 'DEF', 'MID', 'ATT'].flatMap(k => shuffle(POOL.filter(x => x[1] === k)));
+      r.queue = shuffle([...POOL]); // ordem aleatória, qualquer posição
       say(r, 'O leilão vai começar! Boa sorte, cartolas!');
       setTimeout(() => nextLot(r), 3000);
     } else if (m.t === 'again' && p.id === r.host && r.phase === 'end') {
       r.phase = 'lobby'; r.log = []; r.players.forEach(x => { x.budget = BUDGET; x.squad = []; }); bc(r);
+    } else if (m.t === 'skip') {
+      const l = r.lot;
+      if (!l || l.bidder || need(p, l.pos) < 1) return;
+      l.skips.add(p.id);
+      const el = r.players.filter(x => x.ws && need(x, l.pos) > 0);
+      if (el.every(x => l.skips.has(x.id))) close(r); // todos que poderiam comprar querem pular
+      else bc(r);
     } else if (m.t === 'bid') {
       const l = r.lot, a = Math.floor(+m.amount);
       if (!l || !(a > 0) || p.id === l.bidder || need(p, l.pos) < 1 || a > maxBid(p) || a < (l.bidder ? l.bid + 1 : l.base))
